@@ -1,0 +1,24 @@
+# Test TruePic FastAPI endpoints
+
+### Root Frontend
+GET http://127.0.0.1:8000/
+Accept: text/html
+
+### API Health Check
+GET http://127.0.0.1:8000/api/health
+Accept: application/json
+
+### Template Compatibility
+GET http://127.0.0.1:8000/hello/User
+Accept: application/json
+
+### Post Image Analysis (Sample)
+# POST http://127.0.0.1:8000/api/analyze
+# Content-Type: multipart/form-data; boundary=WebAppBoundary
+#
+# --WebAppBoundary
+# Content-Disposition: form-data; name="file"; filename="sample.jpg"
+# Content-Type: image/jpeg
+#
+# < ./sample.jpg
+# --WebAppBoundary--
