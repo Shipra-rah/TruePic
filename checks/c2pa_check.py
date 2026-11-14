@@ -37,7 +37,6 @@ def _inspect_manifest(manifest: dict[str, Any]) -> tuple[bool, str, dict[str, An
     claim_generator = ""
     title = ""
 
-    # Check active manifest if provided
     active_manifest_id = manifest.get("active_manifest")
     manifests = manifest.get("manifests", {})
     target = manifests.get(active_manifest_id, manifest) if active_manifest_id else manifest
@@ -68,6 +67,17 @@ def _inspect_manifest(manifest: dict[str, Any]) -> tuple[bool, str, dict[str, An
             "title": title,
         },
     )
+
+
+def _has_camera_provenance(ctx: ImageContext) -> bool:
+    """Check whether the image has strong physical camera metadata indicators."""
+    has_make = bool(ctx.exif.get("Make"))
+    has_model = bool(ctx.exif.get("Model"))
+    has_exposure = any(k in ctx.exif for k in ("ExposureTime", "FNumber", "ISOSpeedRatings"))
+    has_makernote = ctx.makernote is not None
+    # Consider camera provenance strong if at least 2 of these are present
+    indicators = sum([has_make or has_model, has_exposure, has_makernote])
+    return indicators >= 2
 
 
 def run(ctx: ImageContext) -> CheckResult:
@@ -117,14 +127,32 @@ def run(ctx: ImageContext) -> CheckResult:
             },
         )
 
-    # Normal case: No C2PA credentials found
+    # No C2PA credentials found — context-aware signal:
+    # If image has strong camera provenance, missing C2PA is expected and leans real-like.
+    # If image has no camera provenance, C2PA absence is truly neutral.
+    if _has_camera_provenance(ctx):
+        signal = 0.20
+        evidence = (
+            "No C2PA Content Credentials manifest detected. "
+            "Strong physical camera provenance metadata is present, so a missing C2PA manifest is expected and normal."
+        )
+        conclusive = True
+    else:
+        signal = 0.48
+        evidence = (
+            "No C2PA Content Credentials manifest detected. "
+            "A missing manifest is common for both camera captures and AI-generated images. "
+            "Without other provenance signals this check is neutral."
+        )
+        conclusive = False
+
     return CheckResult(
         key=KEY,
         title=TITLE,
         found=False,
-        signal=0.5,  # Neutral: Missing C2PA is NOT proof of AI
-        conclusive=False,
-        evidence="No C2PA Content Credentials manifest detected. A missing manifest is common for camera captures and legacy digital images.",
+        signal=signal,
+        conclusive=conclusive,
+        evidence=evidence,
         details={
             "status": "Not Found",
             "c2pa_available": True,

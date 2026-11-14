@@ -231,10 +231,10 @@ document.addEventListener('DOMContentLoaded', () => {
     confidenceBadge.textContent = (data.confidence || 'Medium') + ` (${data.confidence_percentage || 0}%)`;
     if (data.confidence === 'High') {
       confidenceBadge.className = 'badge badge-lg badge-real';
-    } else if (data.confidence === 'Low') {
-      confidenceBadge.className = 'badge badge-lg badge-ai';
-    } else {
+    } else if (data.confidence === 'Medium') {
       confidenceBadge.className = 'badge badge-lg badge-neutral';
+    } else {
+      confidenceBadge.className = 'badge badge-lg badge-outline';
     }
 
     // 4. Meta Attributes

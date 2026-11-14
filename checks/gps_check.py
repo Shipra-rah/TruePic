@@ -14,6 +14,13 @@ KEY = "gps"
 TITLE = "GPS Information"
 
 
+def _has_camera_provenance(ctx: ImageContext) -> bool:
+    """Check whether camera hardware metadata is present."""
+    has_make = bool(ctx.exif.get("Make"))
+    has_model = bool(ctx.exif.get("Model"))
+    return has_make or has_model
+
+
 def run(ctx: ImageContext) -> CheckResult:
     """Analyze presence of geographic coordinates in GPS IFD."""
     gps = ctx.gps
@@ -44,13 +51,21 @@ def run(ctx: ImageContext) -> CheckResult:
             },
         )
 
-    # Absence of GPS is neutral (common for privacy / web platforms)
+    # Absence of GPS
+    has_cam = _has_camera_provenance(ctx)
+    if has_cam:
+        signal = 0.25
+        evidence = "No GPS geolocation coordinates detected. Many digital cameras lack GPS hardware, or users disable location tagging for personal privacy."
+    else:
+        signal = 0.50
+        evidence = "No GPS geolocation coordinates detected. Common for stripped web graphics, privacy-scrubbed photos, and synthetic images."
+
     return CheckResult(
         key=KEY,
         title=TITLE,
         found=False,
-        signal=0.5,  # Neutral / Unknown
+        signal=signal,
         conclusive=False,
-        evidence="No GPS geolocation coordinates detected. Many users and social platforms strip GPS data for personal privacy.",
+        evidence=evidence,
         details={"status": "GPS absent"},
     )

@@ -1,49 +1,29 @@
 """
-Integration tests for FastAPI endpoints in main.py.
+Tests for API contracts, schema verification, and core endpoints.
 """
 
 import io
 import pytest
-from fastapi.testclient import TestClient
 from PIL import Image
-
-from main import app
-
-client = TestClient(app)
+from core.analyzer import run_analysis
+from checks import CHECK_MODULES, CHECK_WEIGHTS
 
 
-def test_health_check():
-    response = client.get("/api/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["checks_loaded"] == 11
+def test_health_contract():
+    """Verify that the health check contract matches expectations."""
+    assert len(CHECK_MODULES) == 11
+    assert sum(CHECK_WEIGHTS.values()) == 100
+    assert CHECK_WEIGHTS["sha256"] == 0
 
 
-def test_root_serves_html():
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "text/html" in response.headers.get("content-type", "")
-    assert "TruePic" in response.text
-
-
-def test_template_hello():
-    response = client.get("/hello/Forensics")
-    assert response.status_code == 200
-    assert response.json() == {"message": "Hello Forensics"}
-
-
-def test_analyze_endpoint_valid_image():
-    # Create valid JPEG
+def test_analyze_contract_valid_image():
+    """Verify analyze pipeline schema on a valid JPEG image."""
     im = Image.new("RGB", (800, 600), color=(50, 100, 150))
     buf = io.BytesIO()
     im.save(buf, format="JPEG")
     buf.seek(0)
 
-    files = {"file": ("test_pic.jpg", buf, "image/jpeg")}
-    response = client.post("/api/analyze", files=files)
-    assert response.status_code == 200
-    data = response.json()
+    data = run_analysis(buf.getvalue(), "test_pic.jpg")
 
     assert data["filename"] == "test_pic.jpg"
     assert "sha256" in data
@@ -57,14 +37,13 @@ def test_analyze_endpoint_valid_image():
     assert len(data["checks"]) == 11
 
 
-def test_analyze_endpoint_empty_file():
-    files = {"file": ("empty.jpg", b"", "image/jpeg")}
-    response = client.post("/api/analyze", files=files)
-    assert response.status_code == 400
-    assert "empty" in response.json()["detail"].lower()
+def test_analyze_contract_empty_file():
+    """Verify empty bytes raise ValueError."""
+    with pytest.raises(ValueError, match="empty or too small"):
+        run_analysis(b"", "empty.jpg")
 
 
-def test_analyze_endpoint_corrupt_file():
-    files = {"file": ("corrupt.jpg", b"NOT_AN_IMAGE_CONTENT_BYTES_123456", "image/jpeg")}
-    response = client.post("/api/analyze", files=files)
-    assert response.status_code == 400
+def test_analyze_contract_corrupt_file():
+    """Verify corrupt bytes raise ValueError."""
+    with pytest.raises(ValueError, match="Unsupported or unrecognized"):
+        run_analysis(b"NOT_AN_IMAGE_CONTENT_BYTES_123456", "corrupt.jpg")

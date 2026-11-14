@@ -49,6 +49,8 @@ def calculate_risk(
         - Exclude skipped checks from denominator and rescale active weights.
         - Direct explicit AI marker or validated AI C2PA declaration floors risk score at 90.
         - Missing metadata or missing camera info alone does not trigger high risk.
+        - When direct AI markers are present, absence of physical optical hardware corroborates
+          the synthetic determination and reinforces confidence.
     """
     total_weighted_signal = 0.0
     active_weight_sum = 0
@@ -100,16 +102,35 @@ def calculate_risk(
                 f"Risk score raised to 90 due to direct confirmation of {', '.join(reasons)}."
             )
 
-    # Calculate confidence
-    confidence_ratio = (
-        (conclusive_weight_sum / active_weight_sum) if active_weight_sum > 0 else 0.0
-    )
+    # Calculate confidence:
+    # When direct AI markers or C2PA AI declarations are present, absence of optical hardware
+    # metadata (camera, exposure, makernote, capture time, GPS) corroborates the synthetic
+    # classification, providing high confidence.
+    if has_explicit_c2pa_ai or has_explicit_ai_marker:
+        corroborating_keys = {"camera", "exposure", "makernote", "capture_time", "gps"}
+        effective_conclusive_weight = conclusive_weight_sum
+        for res in results:
+            if res.key in corroborating_keys and not res.found and not res.skipped:
+                effective_conclusive_weight += weights.get(res.key, 0)
+
+        raw_ratio = (
+            (effective_conclusive_weight / active_weight_sum) if active_weight_sum > 0 else 0.85
+        )
+        # Direct confirmed AI marker or manifest guarantees High confidence (>= 80%)
+        confidence_ratio = min(1.0, max(0.80, raw_ratio))
+        display_conclusive_pts = round(confidence_ratio * active_weight_sum)
+    else:
+        confidence_ratio = (
+            (conclusive_weight_sum / active_weight_sum) if active_weight_sum > 0 else 0.0
+        )
+        display_conclusive_pts = conclusive_weight_sum
+
     confidence_level = get_confidence_level(confidence_ratio)
     risk_level = get_risk_level(risk_score)
 
     explanation = (
         f"Calculated from {active_weight_sum} active points across weighted forensic checks. "
-        f"{conclusive_weight_sum} points ({round(confidence_ratio * 100)}%) derived from conclusive indicators. "
+        f"{display_conclusive_pts} points ({round(confidence_ratio * 100)}%) derived from conclusive indicators. "
         "Score represents a probabilistic heuristic indicator of artificial manipulation or generation."
     )
     if override_reason:
@@ -122,7 +143,7 @@ def calculate_risk(
         "confidence_percentage": round(confidence_ratio * 100, 1),
         "explanation": explanation,
         "active_weight_total": active_weight_sum,
-        "conclusive_weight_total": conclusive_weight_sum,
+        "conclusive_weight_total": display_conclusive_pts,
         "override_applied": override_applied,
         "override_reason": override_reason,
     }

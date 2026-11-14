@@ -178,3 +178,67 @@ def test_scoring_ai_override():
     assert scoring["risk_score"] >= 90
     assert scoring["risk_level"] == "Very High"
     assert scoring["override_applied"] is True
+
+
+def test_real_camera_full_pipeline_score():
+    """Verify real camera image outputs 10 to 20 with High confidence."""
+    from core.analyzer import run_analysis
+    data = create_test_image(
+        format="JPEG",
+        size=(4032, 3024),
+        exif_tags={
+            "root": {
+                ExifTags.Base.Make: "Apple",
+                ExifTags.Base.Model: "iPhone 15 Pro",
+            },
+            "exif_ifd": {
+                ExifTags.Base.DateTimeOriginal: "2024:06:10 14:00:00",
+                ExifTags.Base.ExposureTime: 0.002,
+                ExifTags.Base.FNumber: 1.78,
+                ExifTags.Base.ISOSpeedRatings: 100,
+                ExifTags.Base.FocalLength: 6.86,
+                ExifTags.Base.MakerNote: b"Apple iOS data block",
+            },
+            "gps_ifd": {
+                ExifTags.GPS.GPSLatitude: (37, 46, 29),
+                ExifTags.GPS.GPSLongitude: (122, 25, 9),
+            },
+        },
+    )
+    analysis = run_analysis(data, "iphone_photo.jpg")
+    # Requirement 1: Camera image output 10 to 20
+    assert 10 <= analysis["risk_score"] <= 20
+    assert analysis["risk_level"] == "Low"
+    # Requirement 2: High confidence for real image
+    assert analysis["confidence"] == "High"
+    assert analysis["confidence_percentage"] >= 70.0
+
+
+def test_ai_generated_image_high_confidence():
+    """Verify AI image outputs 90 to 99 with High confidence (not 20-25%)."""
+    from core.analyzer import run_analysis
+    data = create_test_image(
+        format="PNG",
+        size=(1024, 1024),
+        png_text={
+            "parameters": "photorealistic portrait, 8k\nSteps: 25, Sampler: Euler a, CFG scale: 7, Seed: 987654321, Size: 1024x1024"
+        },
+    )
+    analysis = run_analysis(data, "diffusion_art.png")
+    # Requirement 3: AI output near 90 to 99
+    assert 90 <= analysis["risk_score"] <= 99
+    assert analysis["risk_level"] == "Very High"
+    # Requirement 3: Confidence should be HIGH, not 20-25%
+    assert analysis["confidence"] == "High"
+    assert analysis["confidence_percentage"] >= 70.0
+
+
+def test_stripped_image_inconclusive():
+    """Verify stripped/social-media image is Inconclusive (~45-55) with Low confidence."""
+    from core.analyzer import run_analysis
+    data = create_test_image(format="JPEG", size=(1080, 1080))
+    analysis = run_analysis(data, "stripped_upload.jpg")
+    assert 40 <= analysis["risk_score"] <= 60
+    assert analysis["risk_level"] == "Inconclusive"
+    assert analysis["confidence"] == "Low"
+

@@ -48,6 +48,17 @@ DIFFUSION_PARAM_PATTERNS = [
 ]
 
 
+def _has_camera_provenance(ctx: ImageContext) -> bool:
+    """Check whether the image has strong physical camera metadata indicators."""
+    has_make = bool(ctx.exif.get("Make"))
+    has_model = bool(ctx.exif.get("Model"))
+    has_exposure = any(k in ctx.exif for k in ("ExposureTime", "FNumber", "ISOSpeedRatings"))
+    has_makernote = ctx.makernote is not None
+    has_time = bool(ctx.exif.get("DateTimeOriginal"))
+    indicators = sum([has_make or has_model, has_exposure, has_makernote, has_time])
+    return indicators >= 2
+
+
 def run(ctx: ImageContext) -> CheckResult:
     """Scan all metadata channels for explicit AI generation markers."""
     detected_markers: list[str] = []
@@ -109,7 +120,7 @@ def run(ctx: ImageContext) -> CheckResult:
                 details[f"xmp_{sig}"] = "Found in XMP payload"
 
     if detected_markers:
-        evidence = "Explicit AI markers found: " + "; ".join(detected_markers[:2])
+        evidence = "Explicit AI markers found: " + "; ".join(detected_markers[:3])
         return CheckResult(
             key=KEY,
             title=TITLE,
@@ -120,12 +131,31 @@ def run(ctx: ImageContext) -> CheckResult:
             details=details,
         )
 
+    # No AI markers found — context-aware signal:
+    # If the image has strong camera provenance, the absence of AI markers
+    # is a positive indicator of authenticity (lean real-like).
+    # If the image has no camera provenance, absence could mean stripped.
+    if _has_camera_provenance(ctx):
+        signal = 0.15
+        evidence = (
+            "No AI generation signatures, diffusion parameters, or IPTC algorithmic media markers detected. "
+            "Combined with verified camera hardware metadata, this supports authentic origin."
+        )
+        conclusive = True
+    else:
+        signal = 0.48
+        evidence = (
+            "No AI generation signatures, diffusion parameters, or IPTC algorithmic media markers detected. "
+            "However, absence does not guarantee authenticity since markers can be stripped."
+        )
+        conclusive = False
+
     return CheckResult(
         key=KEY,
         title=TITLE,
         found=False,
-        signal=0.5,  # Neutral/Unknown: absence does not guarantee it wasn't stripped
-        conclusive=False,
-        evidence="No AI generation signatures, diffusion parameters, or IPTC algorithmic media markers detected.",
+        signal=signal,
+        conclusive=conclusive,
+        evidence=evidence,
         details={"status": "No markers found"},
     )

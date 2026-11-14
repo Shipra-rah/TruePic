@@ -69,15 +69,26 @@ def run(ctx: ImageContext) -> CheckResult:
         f"Format verified: Valid {actual_format} container matching '{ext}' extension.{icc_info}"
     )
 
-    # Images with camera-typical Display P3 or Adobe RGB profiles skew slightly real-like
-    signal = 0.1 if (ctx.icc_profile_present and "display p3" in str(ctx.icc_profile_name).lower()) else 0.3
+    # A valid format with matching extension is expected for both real and AI images.
+    # Display P3 or Adobe RGB profiles are camera-typical.
+    # Default signal: 0.15 (slightly real-leaning — valid format is the norm).
+    icc_name_lower = str(ctx.icc_profile_name).lower() if ctx.icc_profile_name else ""
+    if ctx.icc_profile_present and any(p in icc_name_lower for p in ("display p3", "adobe rgb", "prophoto")):
+        signal = 0.05  # Camera-specific color profile
+        conclusive = True
+    elif ctx.icc_profile_present:
+        signal = 0.1  # Generic ICC profile
+        conclusive = False
+    else:
+        signal = 0.15  # No ICC, normal
+        conclusive = False
 
     return CheckResult(
         key=KEY,
         title=TITLE,
         found=True,
         signal=signal,
-        conclusive=False,
+        conclusive=conclusive,
         evidence=evidence,
         details=details,
     )

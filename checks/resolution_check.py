@@ -35,16 +35,56 @@ AI_TRAINING_RESOLUTIONS = {
 
 # Common physical camera sensor resolutions (width, height)
 CAMERA_SENSOR_RESOLUTIONS = {
+    # 12MP Mobile / Compact
     (4032, 3024): "Standard 12MP Smartphone Sensor (4:3)",
     (3024, 4032): "Standard 12MP Smartphone Sensor (Portrait)",
     (4000, 3000): "Standard 12MP Digital Camera (4:3)",
     (3000, 4000): "Standard 12MP Digital Camera (Portrait)",
+    # 24MP DSLR / Mirrorless / Mobile
     (6000, 4000): "Standard 24MP APS-C / Full-Frame DSLR/Mirrorless (3:2)",
     (4000, 6000): "Standard 24MP APS-C / Full-Frame DSLR/Mirrorless (Portrait)",
+    (5712, 4284): "Standard 24MP Smartphone Sensor (4:3)",
+    (4284, 5712): "Standard 24MP Smartphone Sensor (Portrait)",
+    # 30MP - 36MP Full-Frame DSLR
+    (6720, 4480): "30MP Full-Frame DSLR Sensor (Canon 5D Mk IV 3:2)",
+    (4480, 6720): "30MP Full-Frame DSLR Sensor (Portrait)",
+    (7360, 4912): "36MP Full-Frame DSLR Sensor (Nikon D800/D810 3:2)",
+    (4912, 7360): "36MP Full-Frame DSLR Sensor (Portrait)",
+    # 20MP / 18MP / 16MP Cameras
+    (5472, 3648): "20MP 1-inch / Micro 4/3 Sensor (3:2)",
+    (3648, 5472): "20MP 1-inch / Micro 4/3 Sensor (Portrait)",
+    (5184, 3888): "20MP Micro 4/3 Sensor (4:3)",
+    (3888, 5184): "20MP Micro 4/3 Sensor (Portrait)",
+    (5184, 3456): "18MP APS-C DSLR Sensor (Canon EOS 3:2)",
+    (3456, 5184): "18MP APS-C DSLR Sensor (Portrait)",
+    (4608, 3456): "16MP Micro Four Thirds / Compact Sensor (4:3)",
+    (3456, 4608): "16MP Micro Four Thirds / Compact Sensor (Portrait)",
+    # 48MP - 108MP Quad-Bayer High-Res Mobile
     (8064, 6048): "High-Resolution 48MP Quad-Bayer Sensor",
     (6048, 8064): "High-Resolution 48MP Quad-Bayer Sensor (Portrait)",
+    (8000, 6000): "High-Resolution 48MP Sensor (4:3)",
+    (6000, 8000): "High-Resolution 48MP Sensor (Portrait)",
+    (9248, 6936): "High-Resolution 64MP Quad-Bayer Sensor",
+    (6936, 9248): "High-Resolution 64MP Quad-Bayer Sensor (Portrait)",
+    (12000, 9000): "High-Resolution 108MP Sensor",
+    (9000, 12000): "High-Resolution 108MP Sensor (Portrait)",
+    # 8MP / Standard Video
     (3264, 2448): "Standard 8MP Camera Sensor",
+    (2448, 3264): "Standard 8MP Camera Sensor (Portrait)",
+    (3840, 2160): "4K UHD 16:9 Standard Capture",
+    (2160, 3840): "4K UHD 16:9 Portrait Capture",
+    (1920, 1080): "1080p FHD 16:9 Standard Capture",
+    (1080, 1920): "1080p FHD 16:9 Portrait Capture",
 }
+
+
+def _has_camera_provenance(ctx: ImageContext) -> bool:
+    """Check whether the image has physical camera metadata indicators."""
+    has_make = bool(ctx.exif.get("Make"))
+    has_model = bool(ctx.exif.get("Model"))
+    has_exposure = any(k in ctx.exif for k in ("ExposureTime", "FNumber", "ISOSpeedRatings"))
+    has_time = bool(ctx.exif.get("DateTimeOriginal"))
+    return (has_make or has_model) and (has_exposure or has_time)
 
 
 def run(ctx: ImageContext) -> CheckResult:
@@ -64,6 +104,7 @@ def run(ctx: ImageContext) -> CheckResult:
     mp = round((w * h) / 1_000_000, 2)
     gcd = math.gcd(w, h)
     aspect_ratio = f"{w // gcd}:{h // gcd}" if gcd > 0 else f"{w}:{h}"
+    has_cam = _has_camera_provenance(ctx)
 
     # 1. Exact match with canonical AI generative resolutions
     if (w, h) in AI_TRAINING_RESOLUTIONS:
@@ -94,8 +135,8 @@ def run(ctx: ImageContext) -> CheckResult:
             key=KEY,
             title=TITLE,
             found=True,
-            signal=0.1,  # Real-like
-            conclusive=False,
+            signal=0.15,  # Real-like
+            conclusive=True if has_cam else False,
             evidence=evidence,
             details={
                 "dimensions": f"{w}x{h}",
@@ -105,7 +146,30 @@ def run(ctx: ImageContext) -> CheckResult:
             },
         )
 
-    # 3. Check for exact square power of 2 or 64-multiple commonly used in generation
+    # 3. Check for standard camera aspect ratio (4:3, 3:2, 16:9) with realistic sensor megapixel count
+    ratio = max(w, h) / min(w, h) if min(w, h) > 0 else 0
+    is_cam_ratio = any(abs(ratio - r) < 0.03 for r in (4/3, 3/2, 16/9))
+    if is_cam_ratio and mp >= 2.0 and has_cam:
+        evidence = (
+            f"Dimensions {w}x{h} ({mp} MP) follow standard camera sensor aspect ratio "
+            f"({aspect_ratio}) matching optical hardware capture."
+        )
+        return CheckResult(
+            key=KEY,
+            title=TITLE,
+            found=True,
+            signal=0.15,  # Real-like
+            conclusive=True,
+            evidence=evidence,
+            details={
+                "dimensions": f"{w}x{h}",
+                "megapixels": mp,
+                "aspect_ratio": aspect_ratio,
+                "matched_pattern": "Standard Camera Aspect Ratio",
+            },
+        )
+
+    # 4. Check for exact square power of 2 or 64-multiple commonly used in generation
     if w == h and (w % 64 == 0) and w in (256, 384, 512, 640, 768, 896, 1024, 1280, 1536, 2048):
         evidence = f"Dimensions {w}x{h} (1:1 square, divisible by 64) follow standard AI latent canvas conventions."
         return CheckResult(
@@ -123,12 +187,12 @@ def run(ctx: ImageContext) -> CheckResult:
             },
         )
 
-    evidence = f"Dimensions {w}x{h} ({mp} MP, aspect ratio {aspect_ratio}). Non-standard custom resolution."
+    evidence = f"Dimensions {w}x{h} ({mp} MP, aspect ratio {aspect_ratio}). Custom or cropped resolution."
     return CheckResult(
         key=KEY,
         title=TITLE,
         found=True,
-        signal=0.5,  # Neutral
+        signal=0.45 if has_cam else 0.50,
         conclusive=False,
         evidence=evidence,
         details={
